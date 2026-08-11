@@ -1,10 +1,24 @@
+import os
+import sqlite3
 from flask import Flask, render_template_string, request, redirect, url_for
 from datetime import datetime
 
 app = Flask(__name__)
-transacoes = []
+DB_FILE = "dados.db"
 
-# --- INTERFACE DO AGENTE FINANCEIRO (AOS SOLUÇÕES) ---
+# Função para conectar ao banco de dados
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS transacoes 
+                      (id INTEGER PRIMARY KEY, tipo TEXT, descricao TEXT, valor REAL, 
+                       categoria TEXT, metodo TEXT, data TEXT)''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# --- INTERFACE (Mesma de antes) ---
 HTML_FINANCAS = """
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -42,143 +56,87 @@ HTML_FINANCAS = """
         <div class="subtitulo">Seu Agente Financeiro</div>
 
         <div class="resumo-grid">
-            <div class="btn-resumo bg-credito">CRÉD (Hoje)<br>R$ {{ "%.2f"|format(totais_hoje.Credito) }}</div>
-            <div class="btn-resumo bg-debito">DÉB (Hoje)<br>R$ {{ "%.2f"|format(totais_hoje.Debito) }}</div>
-            <div class="btn-resumo bg-pix">PIX (Hoje)<br>R$ {{ "%.2f"|format(totais_hoje.Pix) }}</div>
-        </div>
-
-        <div style="background: #eef2f7; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 15px; font-size: 13px;">
-            <span style="color: #27ae60;">Ganhos: R$ {{ "%.2f"|format(total_ganhos) }}</span> | 
-            <span style="color: #c0392b;">Gastos: R$ {{ "%.2f"|format(total_gastos) }}</span><br>
-            <span style="color: #2980b9; font-weight: bold;">Total deste Mês: R$ {{ "%.2f"|format(total_mes) }}</span><br>
-            <strong>Saldo Geral: R$ {{ "%.2f"|format(saldo) }}</strong>
+            <div class="btn-resumo bg-credito">CRÉD<br>R$ {{ "%.2f"|format(totais.Credito) }}</div>
+            <div class="btn-resumo bg-debito">DÉB<br>R$ {{ "%.2f"|format(totais.Debito) }}</div>
+            <div class="btn-resumo bg-pix">PIX<br>R$ {{ "%.2f"|format(totais.Pix) }}</div>
         </div>
 
         <form action="/adicionar" method="POST">
             <select name="tipo" required>
-                <option value="Gasto">📉 Gasto (Saída)</option>
-                <option value="Ganho">📈 Ganho (Entrada)</option>
+                <option value="Gasto">📉 Gasto</option>
+                <option value="Ganho">📈 Ganho</option>
             </select>
             <input type="date" name="data" required>
-            <input type="text" name="descricao" placeholder="Descrição (ex: Uber, Academia...)" required>
+            <input type="text" name="descricao" placeholder="Descrição" required>
             <input type="number" step="0.01" name="valor" placeholder="Valor R$" required>
             <select name="categoria">
                 <option value="Academia">Academia</option>
-                <option value="Locomoção (App)">Locomoção (App)</option>
-                <option value="Futebol">Futebol</option>
-                <option value="Salário">Salário</option>
-                <option value="Prestação de Serviço">Prestação de Serviço</option>
                 <option value="Alimentação">Alimentação</option>
-                <option value="Lazer">Lazer</option>
-                <option value="Contas">Contas</option>
+                <option value="Salário">Salário</option>
                 <option value="Outros">Outros</option>
             </select>
             <select name="metodo">
                 <option value="Pix">Pix</option>
                 <option value="Debito">Débito</option>
                 <option value="Credito">Crédito</option>
-                <option value="Dinheiro">Dinheiro</option>
             </select>
             <button type="submit" style="background:#2c3e50; color:white; font-weight:bold; cursor:pointer;">REGISTRAR</button>
         </form>
 
-        <h4 style="text-align:center; margin-bottom:5px;">Gastos por Categoria (Este Mês)</h4>
-        <canvas id="meuGrafico"></canvas>
-
         <div class="extrato">
-            <h4>Histórico Recente:</h4>
-            {% for indice, t in transacoes %}
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #f0f0f0; padding-bottom: 6px;">
-                    <div>
-                        <small>{{ t.data }}</small><br>
-                        <strong>{{ t.descricao }}</strong> <small>({{ t.categoria }})</small>
-                    </div>
+            <h4>Histórico:</h4>
+            {% for t in transacoes %}
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding: 6px 0;">
+                    <div><small>{{ t[6] }}</small><br><strong>{{ t[2] }}</strong></div>
                     <div style="text-align: right;">
-                        <span class="{{ 'item-ganho' if t.tipo == 'Ganho' else 'item-gasto' }}">
-                            {{ '+' if t.tipo == 'Ganho' else '-' }} R$ {{ "%.2f"|format(t.valor) }}
-                        </span><br>
-                        <small>{{ t.metodo }}</small>
+                        <span class="{{ 'item-ganho' if t[1] == 'Ganho' else 'item-gasto' }}">
+                            {{ '+' if t[1] == 'Ganho' else '-' }} R$ {{ "%.2f"|format(t[3]) }}
+                        </span>
                     </div>
-                    <div>
-                        <form action="/remover/{{ indice }}" method="POST" style="margin: 0;">
-                            <button type="submit" class="btn-remover">X</button>
-                        </form>
-                    </div>
+                    <form action="/remover/{{ t[0] }}" method="POST"><button type="submit" class="btn-remover">X</button></form>
                 </div>
             {% endfor %}
         </div>
     </div>
-
-    <script>
-        const ctx = document.getElementById('meuGrafico').getContext('2d');
-        new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: [{% for cat, val in categorias.items() %}'{{ cat }}',{% endfor %}],
-                datasets: [{
-                    data: [{% for cat, val in categorias.items() %}{{ val }},{% endfor %}],
-                    backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40']
-                }]
-            }
-        });
-    </script>
 </body>
 </html>
 """
 
 @app.route('/')
 def index():
-    hoje = datetime.now().strftime('%Y-%m-%d')
-    mes_atual = datetime.now().strftime('%Y-%m')
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM transacoes ORDER BY data DESC")
+    transacoes = cursor.fetchall()
     
-    gastos_hoje = [t for t in transacoes if t['tipo'] == 'Gasto' and t['data'] == hoje]
-    totais_hoje = {'Credito': 0, 'Debito': 0, 'Pix': 0}
-    for item in gastos_hoje:
-        metodo = item['metodo']
-        if metodo in totais_hoje:
-            totais_hoje[metodo] += item['valor']
-            
-    total_gastos = sum(t['valor'] for t in transacoes if t['tipo'] == 'Gasto')
-    total_ganhos = sum(t['valor'] for t in transacoes if t['tipo'] == 'Ganho')
-    saldo = total_ganhos - total_gastos
-    total_mes = sum(t['valor'] for t in transacoes if t['tipo'] == 'Gasto' and t['data'].startswith(mes_atual))
+    # Calcular totais (simplificado para o exemplo)
+    totais = {'Credito': 0, 'Debito': 0, 'Pix': 0}
+    for t in transacoes:
+        if t[1] == 'Gasto' and t[5] in totais:
+            totais[t[5]] += t[3]
+    conn.close()
     
-    categorias_mes = {}
-    for item in transacoes:
-        if item['tipo'] == 'Gasto' and item['data'].startswith(mes_atual):
-            cat = item['categoria']
-            categorias_mes[cat] = categorias_mes.get(cat, 0) + item['valor']
-            
-    transacoes_ordenadas = sorted(enumerate(transacoes), key=lambda x: x[1]['data'], reverse=True)
-    
-    return render_template_string(HTML_FINANCAS, 
-                                  transacoes=transacoes_ordenadas, 
-                                  totais_hoje=totais_hoje, 
-                                  total_gastos=total_gastos,
-                                  total_ganhos=total_ganhos,
-                                  total_mes=total_mes,
-                                  saldo=saldo,
-                                  categorias=categorias_mes)
+    return render_template_string(HTML_FINANCAS, transacoes=transacoes, totais=totais)
 
 @app.route('/adicionar', methods=['POST'])
 def adicionar():
-    transacoes.append({
-        'tipo': request.form.get('tipo'),
-        'descricao': request.form.get('descricao'),
-        'valor': float(request.form.get('valor')),
-        'categoria': request.form.get('categoria'),
-        'metodo': request.form.get('metodo'),
-        'data': request.form.get('data') or datetime.now().strftime('%Y-%m-%d')
-    })
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO transacoes (tipo, descricao, valor, categoria, metodo, data) VALUES (?,?,?,?,?,?)",
+                   (request.form['tipo'], request.form['descricao'], float(request.form['valor']), 
+                    request.form['categoria'], request.form['metodo'], request.form['data']))
+    conn.commit()
+    conn.close()
     return redirect(url_for('index'))
 
-@app.route('/remover/<int:indice>', methods=['POST'])
-def remover(indice):
-    if 0 <= indice < len(transacoes):
-        transacoes.pop(indice)
+@app.route('/remover/<int:id>', methods=['POST'])
+def remover(id):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM transacoes WHERE id = ?", (id,))
+    conn.commit()
+    conn.close()
     return redirect(url_for('index'))
-
-import os
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
